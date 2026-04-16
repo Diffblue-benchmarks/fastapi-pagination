@@ -188,6 +188,48 @@ def test_use_links_customize_page_ns_pydantic_v1():
     pass
 
 
+def test_use_links_customize_page_ns_pydantic_v1_adds_validator(mocker):
+    mocker.patch("fastapi_pagination.links.bases.IS_PYDANTIC_V2", False)
+    mocker.patch("fastapi_pagination.links.bases.root_validator", return_value=lambda f: f)
+    mocker.patch("fastapi_pagination.links.bases.UseAdditionalFields")
+
+    ns = {}
+    customizer = ConcreteUseLinks()
+    customizer.customize_page_ns(None, ns)
+
+    assert "__links_root_validator__" in ns
+    assert callable(ns["__links_root_validator__"])
+
+
+def test_use_links_customize_page_ns_pydantic_v1_validator_updates_values(mocker):
+    mocker.patch("fastapi_pagination.links.bases.IS_PYDANTIC_V2", False)
+    mocker.patch("fastapi_pagination.links.bases.root_validator", return_value=lambda f: f)
+    mocker.patch("fastapi_pagination.links.bases.UseAdditionalFields")
+
+    ns = {}
+    customizer = ConcreteUseLinks()
+    customizer.customize_page_ns(None, ns)
+
+    validator_fn = ns["__links_root_validator__"]
+    values = {}
+    result = validator_fn(None, values)
+    assert result is values
+    assert result["links"] == Links(first="/first", last="/last", self="/self", next=None, prev=None)
+
+
+def test_use_links_customize_page_ns_pydantic_v1_uses_add_field(mocker):
+    mocker.patch("fastapi_pagination.links.bases.IS_PYDANTIC_V2", False)
+    mocker.patch("fastapi_pagination.links.bases.root_validator", return_value=lambda f: f)
+    mock_cls = mocker.patch("fastapi_pagination.links.bases.UseAdditionalFields")
+
+    ns = {}
+    customizer = ConcreteUseLinks(field="custom_links")
+    customizer.customize_page_ns(None, ns)
+
+    mock_cls.assert_called_once()
+    mock_cls.return_value.customize_page_ns.assert_called_once_with(None, ns)
+
+
 # --- BaseUseHeaderLinks._add_links_to_header ---
 
 
