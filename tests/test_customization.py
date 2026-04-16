@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import pytest
+from fastapi import Response
 from pydantic import BaseModel
 from typing import Any, Sequence
 
@@ -378,3 +379,108 @@ def test_use_response_headers_non_v2_raises():
 
     result = CustomizedPage[Page, UseResponseHeaders(resolver=resolver)]
     assert isinstance(result, type)
+
+
+def _make_page_with_headers(resolver):
+    """Helper: create CustomizedPage with UseResponseHeaders and a real Response."""
+    from fastapi_pagination.api import _rsp_val
+
+    CustomPage = CustomizedPage[Page, UseResponseHeaders(resolver=resolver)]
+    rsp = Response()
+    token = _rsp_val.set(rsp)
+    try:
+        page = CustomPage(items=[1, 2, 3], total=3, page=1, size=10, pages=1)
+    finally:
+        _rsp_val.reset(token)
+    return page, rsp
+
+
+def test_use_response_headers_model_post_init_str_header():
+    """model_post_init sets a str header value on the response."""
+    def resolver(page):
+        return {"X-Custom": "hello"}
+
+    page, rsp = _make_page_with_headers(resolver)
+    assert rsp.headers["x-custom"] == "hello"
+
+
+def test_use_response_headers_model_post_init_sequence_header():
+    """model_post_init appends sequence header values on the response."""
+    def resolver(page):
+        return {"X-Items": ["a", "b", "c"]}
+
+    page, rsp = _make_page_with_headers(resolver)
+    # Headers should contain all appended values
+    raw_headers = [(k.decode(), v.decode()) for k, v in rsp.raw_headers]
+    x_items_values = [v for k, v in raw_headers if k.lower() == "x-items"]
+    assert x_items_values == ["a", "b", "c"]
+
+
+def test_use_response_headers_model_post_init_sequence_replaces_existing():
+    """model_post_init deletes existing header before appending sequence values."""
+    from fastapi_pagination.api import _rsp_val
+
+    def resolver(page):
+        return {"X-Items": ["new1", "new2"]}
+
+    CustomPage = CustomizedPage[Page, UseResponseHeaders(resolver=resolver)]
+    rsp = Response(headers={"X-Items": "old"})
+    token = _rsp_val.set(rsp)
+    try:
+        CustomPage(items=[], total=0, page=1, size=10, pages=0)
+    finally:
+        _rsp_val.reset(token)
+
+    raw_headers = [(k.decode(), v.decode()) for k, v in rsp.raw_headers]
+    x_items_values = [v for k, v in raw_headers if k.lower() == "x-items"]
+    # Old value should be replaced by new values
+    assert "old" not in x_items_values
+    assert "new1" in x_items_values
+    assert "new2" in x_items_values
+
+
+def test_use_response_headers_model_post_init_invalid_type_raises():
+    """model_post_init raises TypeError for header values that are not str or Sequence."""
+    from fastapi_pagination.api import _rsp_val
+
+    def resolver(page):
+        return {"X-Bad": 12345}
+
+    CustomPage = CustomizedPage[Page, UseResponseHeaders(resolver=resolver)]
+    rsp = Response()
+    token = _rsp_val.set(rsp)
+    try:
+        with pytest.raises(TypeError, match="Header value must be str or list"):
+            CustomPage(items=[], total=0, page=1, size=10, pages=0)
+    finally:
+        _rsp_val.reset(token)
+
+
+def test_use_response_headers_model_post_init_multiple_headers():
+    """model_post_init handles multiple headers from the resolver."""
+    def resolver(page):
+        return {"X-A": "val-a", "X-B": ["b1", "b2"]}
+
+    page, rsp = _make_page_with_headers(resolver)
+    assert rsp.headers["x-a"] == "val-a"
+    raw_headers = [(k.decode(), v.decode()) for k, v in rsp.raw_headers]
+    x_b_values = [v for k, v in raw_headers if k.lower() == "x-b"]
+    assert x_b_values == ["b1", "b2"]
+
+
+def test_use_response_headers_model_post_init_empty_resolver():
+    """model_post_init with resolver returning empty dict does not modify headers."""
+    from fastapi_pagination.api import _rsp_val
+
+    def resolver(page):
+        return {}
+
+    CustomPage = CustomizedPage[Page, UseResponseHeaders(resolver=resolver)]
+    rsp = Response()
+    token = _rsp_val.set(rsp)
+    try:
+        CustomPage(items=[1], total=1, page=1, size=10, pages=1)
+    finally:
+        _rsp_val.reset(token)
+    # No custom headers should be set (only default content-length)
+    assert "x-custom" not in rsp.headers
