@@ -156,6 +156,21 @@ def test_use_fields_aliases_pydantic_v2():
     assert isinstance(result, type)
 
 
+def test_use_fields_aliases_pydantic_v1():
+    result = CustomizedPage[Page, UsePydanticV1(), UseFieldsAliases(total="totalCount")]
+    assert isinstance(result, type)
+
+
+def test_use_fields_aliases_pydantic_v1_alias_set():
+    result = CustomizedPage[Page, UsePydanticV1(), UseFieldsAliases(total="totalCount")]
+    assert result.__fields__["total"].alias == "totalCount"
+
+
+def test_use_fields_aliases_pydantic_v1_unknown_field_raises():
+    with pytest.raises(AssertionError, match="Unknown field"):
+        CustomizedPage[Page, UsePydanticV1(), UseFieldsAliases(nonexistent_field="alias")]
+
+
 # ─── UseIncludeTotal ─────────────────────────────────────────────────────────
 
 def test_use_include_total_true():
