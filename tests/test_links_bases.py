@@ -274,11 +274,26 @@ def test_use_header_links_customize_page_ns_pydantic_v1(mocker):
     mock_v1.assert_called_once_with(None, ns)
 
 
-@pytest.mark.skip(reason="pydantic v1 path not exercised when IS_PYDANTIC_V2=True")
-def test_customize_page_ns_pydantic_v1_adds_validator():
-    pass
+def test_customize_page_ns_pydantic_v1_adds_validator(mocker):
+    mocker.patch("fastapi_pagination.links.bases.root_validator", return_value=lambda f: f)
+    customizer = ConcreteUseHeaderLinks()
+    ns = {}
+    customizer._customize_page_ns_pydantic_v1(None, ns)
+    assert "__add_links_to_header__" in ns
+    assert callable(ns["__add_links_to_header__"])
 
 
-@pytest.mark.skip(reason="pydantic v1 path not exercised when IS_PYDANTIC_V2=True")
-def test_add_links_to_header_pydantic_v1_validator():
-    pass
+def test_add_links_to_header_pydantic_v1_validator(rsp, mocker):
+    mocker.patch("fastapi_pagination.links.bases.root_validator", return_value=lambda f: f)
+    token = _rsp_val.set(rsp)
+    try:
+        customizer = ConcreteUseHeaderLinks()
+        ns = {}
+        customizer._customize_page_ns_pydantic_v1(None, ns)
+        validator_fn = ns["__add_links_to_header__"]
+        values = {}
+        result = validator_fn(None, values)
+        assert result is values
+        assert "Link" in rsp.headers
+    finally:
+        _rsp_val.reset(token)
