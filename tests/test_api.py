@@ -24,6 +24,7 @@ from fastapi_pagination.api import (
     pagination_ctx,
     _ctx_var_with_reset,
     _model_validate_has_by_name_param,
+    _patch_openapi,
 )
 from fastapi_pagination.bases import AbstractParams, RawParams
 from fastapi_pagination.default import Page, Params
@@ -326,3 +327,43 @@ def test_add_pagination_router():
     client = TestClient(app)
     resp = client.get("/items")
     assert resp.status_code == 200
+
+
+# ---- _patch_openapi ----
+
+def test_patch_openapi_updates_paths():
+    dst = {"paths": {"/a": {"get": {}}}}
+    src = {"paths": {"/b": {"post": {}}}}
+    _patch_openapi(dst, src)
+    assert "/a" in dst["paths"]
+    assert "/b" in dst["paths"]
+
+
+def test_patch_openapi_updates_components_schemas():
+    dst = {"components": {"schemas": {"Foo": {"type": "object"}}}}
+    src = {"components": {"schemas": {"Bar": {"type": "string"}}}}
+    _patch_openapi(dst, src)
+    assert "Foo" in dst["components"]["schemas"]
+    assert "Bar" in dst["components"]["schemas"]
+
+
+def test_patch_openapi_missing_paths_key_suppressed():
+    dst = {}
+    src = {"paths": {"/b": {"post": {}}}}
+    _patch_openapi(dst, src)
+    assert "paths" not in dst
+
+
+def test_patch_openapi_missing_components_schemas_suppressed():
+    dst = {"paths": {"/a": {}}}
+    src = {"components": {"schemas": {"Bar": {}}}}
+    _patch_openapi(dst, src)
+    assert "components" not in dst
+
+
+def test_patch_openapi_both_paths_and_schemas():
+    dst = {"paths": {"/a": {}}, "components": {"schemas": {"Foo": {}}}}
+    src = {"paths": {"/b": {}}, "components": {"schemas": {"Bar": {}}}}
+    _patch_openapi(dst, src)
+    assert dst["paths"] == {"/a": {}, "/b": {}}
+    assert dst["components"]["schemas"] == {"Foo": {}, "Bar": {}}
