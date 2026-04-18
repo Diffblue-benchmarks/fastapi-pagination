@@ -296,3 +296,79 @@ def test_root_validator_calls_resolve_links():
         assert "Link" in mock_response.headers
     finally:
         _rsp_val.reset(token)
+
+
+# ---------------------------------------------------------------------------
+# BaseUseLinks.customize_page_ns - pydantic v1 branch (lines 111-119)
+# ---------------------------------------------------------------------------
+
+def test_base_use_links_customize_page_ns_pydantic_v1_adds_root_validator(mocker):
+    """Test that the pydantic v1 path adds __links_root_validator__ to namespace."""
+    mocker.patch("fastapi_pagination.links.bases.IS_PYDANTIC_V2", False)
+
+    customizer = ConcreteUseLinks()
+    ns = {}
+    page_cls = MagicMock()
+
+    customizer.customize_page_ns(page_cls, ns)
+
+    assert "__links_root_validator__" in ns
+    assert "__annotations__" in ns
+    assert customizer.field in ns["__annotations__"]
+
+
+def test_base_use_links_customize_page_ns_pydantic_v1_adds_field_to_annotations(mocker):
+    """Test that the pydantic v1 path populates __annotations__ with the links field."""
+    mocker.patch("fastapi_pagination.links.bases.IS_PYDANTIC_V2", False)
+
+    customizer = ConcreteUseLinks()
+    ns = {}
+    page_cls = MagicMock()
+
+    customizer.customize_page_ns(page_cls, ns)
+
+    anns = ns.get("__annotations__", {})
+    assert customizer.field in anns
+    assert anns[customizer.field] is Links
+
+
+def test_base_use_links_customize_page_ns_pydantic_v1_root_validator_calls_resolve_links(mocker):
+    """Test that the root validator created in pydantic v1 path calls resolve_links."""
+    mocker.patch("fastapi_pagination.links.bases.IS_PYDANTIC_V2", False)
+
+    customizer = ConcreteUseLinks()
+    ns = {}
+    page_cls = MagicMock()
+
+    customizer.customize_page_ns(page_cls, ns)
+
+    validator_fn = ns["__links_root_validator__"]
+    values = {"items": [], "total": 0}
+    result = validator_fn.__func__(MagicMock, values)
+
+    assert result is values
+    assert customizer.field in result
+    assert isinstance(result[customizer.field], Links)
+
+
+def test_base_use_links_customize_page_ns_pydantic_v1_custom_field(mocker):
+    """Test pydantic v1 path uses the configured field name."""
+    mocker.patch("fastapi_pagination.links.bases.IS_PYDANTIC_V2", False)
+
+    from dataclasses import dataclass as dc
+
+    @dc
+    class CustomFieldUseLinks(BaseUseLinks):
+        field: str = "custom_links"
+
+        def resolve_links(self, _page, /) -> Links:
+            return Links(first="/f", last="/l")
+
+    customizer = CustomFieldUseLinks()
+    ns = {}
+    page_cls = MagicMock()
+
+    customizer.customize_page_ns(page_cls, ns)
+
+    assert "__links_root_validator__" in ns
+    assert "custom_links" in ns.get("__annotations__", {})
