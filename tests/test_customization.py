@@ -394,6 +394,101 @@ def test_use_response_headers_adds_model_post_init():
     assert "model_post_init" in MyPage.__dict__
 
 
+def test_use_response_headers_model_post_init_str_value():
+    from fastapi import Response
+    from fastapi_pagination.api import _rsp_val
+
+    def resolver(page: Any) -> dict:
+        return {"X-Total": "42"}
+
+    MyPage = CustomizedPage[Page, UseResponseHeaders(resolver=resolver)]
+    rsp = Response()
+    token = _rsp_val.set(rsp)
+    try:
+        page = MyPage(items=[], total=5, page=1, size=10, pages=1)
+        assert rsp.headers.get("x-total") == "42"
+    finally:
+        _rsp_val.reset(token)
+
+
+def test_use_response_headers_model_post_init_sequence_value():
+    from fastapi import Response
+    from fastapi_pagination.api import _rsp_val
+
+    def resolver(page: Any) -> dict:
+        return {"X-Items": ["a", "b"]}
+
+    MyPage = CustomizedPage[Page, UseResponseHeaders(resolver=resolver)]
+    rsp = Response()
+    token = _rsp_val.set(rsp)
+    try:
+        page = MyPage(items=[], total=5, page=1, size=10, pages=1)
+        header_values = [v for k, v in rsp.headers.items() if k.lower() == "x-items"]
+        assert header_values == ["a", "b"]
+    finally:
+        _rsp_val.reset(token)
+
+
+def test_use_response_headers_model_post_init_sequence_replaces_existing():
+    from fastapi import Response
+    from fastapi_pagination.api import _rsp_val
+
+    call_count = 0
+
+    def resolver(page: Any) -> dict:
+        nonlocal call_count
+        call_count += 1
+        return {"X-Items": ["x", "y"]}
+
+    MyPage = CustomizedPage[Page, UseResponseHeaders(resolver=resolver)]
+    rsp = Response()
+    rsp.headers["x-items"] = "old"
+    token = _rsp_val.set(rsp)
+    try:
+        page = MyPage(items=[], total=5, page=1, size=10, pages=1)
+        header_values = [v for k, v in rsp.headers.items() if k.lower() == "x-items"]
+        assert "old" not in header_values
+        assert header_values == ["x", "y"]
+    finally:
+        _rsp_val.reset(token)
+
+
+def test_use_response_headers_model_post_init_invalid_value_raises():
+    from fastapi import Response
+    from fastapi_pagination.api import _rsp_val
+
+    def resolver(page: Any) -> dict:
+        return {"X-Bad": 123}  # type: ignore[return-value]
+
+    MyPage = CustomizedPage[Page, UseResponseHeaders(resolver=resolver)]
+    rsp = Response()
+    token = _rsp_val.set(rsp)
+    try:
+        with pytest.raises(TypeError, match="Header value must be str or list"):
+            MyPage(items=[], total=5, page=1, size=10, pages=1)
+    finally:
+        _rsp_val.reset(token)
+
+
+def test_use_response_headers_model_post_init_calls_parent():
+    from fastapi import Response
+    from fastapi_pagination.api import _rsp_val
+
+    parent_called = []
+
+    def resolver(page: Any) -> dict:
+        return {}
+
+    MyPage = CustomizedPage[Page, UseResponseHeaders(resolver=resolver)]
+    rsp = Response()
+    token = _rsp_val.set(rsp)
+    try:
+        page = MyPage(items=[], total=5, page=1, size=10, pages=1)
+        assert isinstance(page, Page)
+    finally:
+        _rsp_val.reset(token)
+
+
 # --------------------------------------------------------------------------- #
 # UsePydanticV1 (PageTransformer)                                             #
 # --------------------------------------------------------------------------- #
