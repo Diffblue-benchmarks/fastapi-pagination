@@ -354,6 +354,25 @@ def test_use_fields_aliases_sets_alias():
     assert MyPage.model_fields["total"].serialization_alias == "count"
 
 
+def test_use_fields_aliases_v1_sets_alias():
+    V1Page = CustomizedPage[Page, UsePydanticV1()]
+    AliasedPage = CustomizedPage[V1Page, UseFieldsAliases(total="count")]
+    assert AliasedPage.__fields__["total"].alias == "count"
+
+
+def test_use_fields_aliases_v1_multiple_aliases():
+    V1Page = CustomizedPage[Page, UsePydanticV1()]
+    AliasedPage = CustomizedPage[V1Page, UseFieldsAliases(total="count", page="current_page")]
+    assert AliasedPage.__fields__["total"].alias == "count"
+    assert AliasedPage.__fields__["page"].alias == "current_page"
+
+
+def test_use_fields_aliases_v1_unknown_field_raises():
+    V1Page = CustomizedPage[Page, UsePydanticV1()]
+    with pytest.raises(AssertionError, match="Unknown field 'nonexistent'"):
+        CustomizedPage[V1Page, UseFieldsAliases(nonexistent="alias")]
+
+
 # --------------------------------------------------------------------------- #
 # UseAdditionalFields                                                          #
 # --------------------------------------------------------------------------- #
