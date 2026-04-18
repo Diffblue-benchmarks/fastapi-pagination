@@ -7,9 +7,11 @@ from typing import Any
 import pytest
 from fastapi import FastAPI
 from httpx import AsyncClient, ASGITransport
+from pydantic import BaseModel
 
 import fastapi_pagination.api as _api_module
 from fastapi_pagination.api import (
+    _create_params_dependency,
     _ctx_var_with_reset,
     _model_validate_has_by_name_param,
     _noop_dep,
@@ -29,6 +31,7 @@ from fastapi_pagination.api import (
     set_page,
     set_params,
 )
+from fastapi_pagination.bases import AbstractParams, RawParams
 from fastapi_pagination.default import Page, Params
 from fastapi_pagination.errors import UninitializedConfigurationError
 
@@ -420,3 +423,66 @@ async def test_full_pagination_flow():
     assert data["page"] == 2
     assert data["size"] == 10
     assert len(data["items"]) == 10
+
+
+# ---------------------------------------------------------------------------
+# _create_params_dependency - uncovered lines
+# ---------------------------------------------------------------------------
+
+class _SimpleParams(AbstractParams):
+    """Non-pydantic params class to exercise line 241 (else branch)."""
+
+    def __init__(self, page: int = 1, size: int = 10) -> None:
+        self.page = page
+        self.size = size
+
+    def to_raw_params(self) -> RawParams:
+        return RawParams(limit=self.size, offset=(self.page - 1) * self.size)
+
+
+@pytest.mark.asyncio
+async def test_create_params_dependency_non_pydantic_model():
+    """Line 241: val = params(*args, **kwargs) when params is not a pydantic BaseModel."""
+    dep = _create_params_dependency(_SimpleParams)
+    collected = []
+    async for val in dep(page=2, size=5):
+        collected.append(val)
+    assert len(collected) == 1
+    assert isinstance(collected[0], _SimpleParams)
+    assert collected[0].page == 2
+    assert collected[0].size == 5
+
+
+class _RequiredParams(BaseModel, AbstractParams):
+    """Pydantic v2 model with required fields (no defaults) to exercise line 260."""
+
+    page: int
+    size: int
+
+    def to_raw_params(self) -> RawParams:
+        return RawParams(limit=self.size, offset=(self.page - 1) * self.size)
+
+
+@pytest.mark.asyncio
+async def test_create_params_dependency_pydantic_required_fields():
+    """Line 260: param_default = inspect.Parameter.empty when field has no default."""
+    dep = _create_params_dependency(_RequiredParams)
+    collected = []
+    async for val in dep(page=1, size=20):
+        collected.append(val)
+    assert len(collected) == 1
+    assert isinstance(collected[0], _RequiredParams)
+    assert collected[0].page == 1
+    assert collected[0].size == 20
+
+
+@pytest.mark.asyncio
+async def test_create_params_dependency_old_pydantic_v2_path(mocker):
+    """Lines 270-271: _get_param for older pydantic v2 (IS_PYDANTIC_V2_12_5_OR_HIGHER=False)."""
+    mocker.patch("fastapi_pagination.api.IS_PYDANTIC_V2_12_5_OR_HIGHER", False)
+    dep = _create_params_dependency(Params)
+    collected = []
+    async for val in dep(page=1, size=10):
+        collected.append(val)
+    assert len(collected) == 1
+    assert isinstance(collected[0], Params)
