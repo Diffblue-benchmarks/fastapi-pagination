@@ -13,8 +13,9 @@ from sqlalchemy.sql.elements import TextClause
 
 from fastapi_pagination import Page, Params
 from fastapi_pagination.api import set_page
-from fastapi_pagination.bases import RawParams
+from fastapi_pagination.bases import CursorRawParams, RawParams
 from fastapi_pagination.ext.sqlalchemy import (
+    _cursor_flow,
     _inner_transformer,
     _maybe_unique,
     _new_paginate_sign,
@@ -31,6 +32,7 @@ from fastapi_pagination.ext.sqlalchemy import (
     create_paginate_query_from_text,
     paginate,
 )
+from fastapi_pagination.flow import run_sync_flow
 
 
 class Base(DeclarativeBase):
@@ -602,3 +604,101 @@ async def test_apaginate_pagination():
 
     assert result.total == 5
     assert len(result.items) == 2
+
+
+# ── _cursor_flow ─────────────────────────────────────────────────────────────
+
+
+def test_cursor_flow_raises_for_text_clause():
+    q = text("SELECT * FROM t")
+    raw_params = CursorRawParams(cursor=None, size=10)
+    conn = MagicMock()
+    gen = _cursor_flow(q, conn, unique=False, is_async=False, raw_params=raw_params)
+    with pytest.raises(ValueError, match="raw SQL queries"):
+        gen.send(None)
+
+
+def test_cursor_flow_raises_for_from_statement():
+    from sqlalchemy.orm import FromStatement
+
+    raw_params = CursorRawParams(cursor=None, size=10)
+    conn = MagicMock()
+    mock_fs = MagicMock(spec=FromStatement)
+    mock_fs._order_by_clauses = (MagicMock(),)
+    gen = _cursor_flow(mock_fs, conn, unique=False, is_async=False, raw_params=raw_params)
+    with pytest.raises(ValueError, match="FromStatement"):
+        gen.send(None)
+
+
+def test_cursor_flow_raises_for_missing_ordering():
+    q = select(User)  # no ORDER BY → _order_by_clauses is ()
+    raw_params = CursorRawParams(cursor=None, size=10)
+    conn = MagicMock()
+    with patch("fastapi_pagination.ext.sqlalchemy.paging") as mock_paging:
+        mock_paging.__bool__ = lambda self: True
+        gen = _cursor_flow(q, conn, unique=False, is_async=False, raw_params=raw_params)
+        with pytest.raises(ValueError, match="ordering"):
+            gen.send(None)
+
+
+def _make_mock_page(items, has_previous=False, has_next=False):
+    mock_page = MagicMock()
+    mock_page.__iter__ = MagicMock(return_value=iter(items))
+    mock_page.paging.bookmark_current = "curr"
+    mock_page.paging.bookmark_current_backwards = "curr_back"
+    mock_page.paging.has_previous = has_previous
+    mock_page.paging.has_next = has_next
+    mock_page.paging.bookmark_previous = "prev" if has_previous else None
+    mock_page.paging.bookmark_next = "next" if has_next else None
+    return mock_page
+
+
+def test_cursor_flow_sync_happy_path():
+    q = select(User).order_by(User.id)
+    raw_params = CursorRawParams(cursor=None, size=10)
+    conn = MagicMock()
+    mock_page = _make_mock_page([1, 2, 3])
+
+    with patch("fastapi_pagination.ext.sqlalchemy.paging") as mock_paging:
+        mock_paging.select_page = MagicMock(return_value=mock_page)
+        gen = _cursor_flow(q, conn, unique=False, is_async=False, raw_params=raw_params)
+        items, data = run_sync_flow(gen)
+
+    assert items == [1, 2, 3]
+    assert data["current"] == "curr"
+    assert data["current_backwards"] == "curr_back"
+    assert data["previous"] is None
+    assert data["next_"] is None
+
+
+def test_cursor_flow_sync_with_pagination_cursors():
+    q = select(User).order_by(User.id)
+    raw_params = CursorRawParams(cursor=None, size=2)
+    conn = MagicMock()
+    mock_page = _make_mock_page([1, 2], has_previous=True, has_next=True)
+
+    with patch("fastapi_pagination.ext.sqlalchemy.paging") as mock_paging:
+        mock_paging.select_page = MagicMock(return_value=mock_page)
+        gen = _cursor_flow(q, conn, unique=False, is_async=False, raw_params=raw_params)
+        items, data = run_sync_flow(gen)
+
+    assert items == [1, 2]
+    assert data["previous"] == "prev"
+    assert data["next_"] == "next"
+
+
+def test_cursor_flow_async_uses_apaging():
+    q = select(User).order_by(User.id)
+    raw_params = CursorRawParams(cursor=None, size=5)
+    conn = MagicMock()
+    mock_page = _make_mock_page([10, 20])
+
+    with patch("fastapi_pagination.ext.sqlalchemy.apaging") as mock_apaging, \
+         patch("fastapi_pagination.ext.sqlalchemy.paging") as mock_paging:
+        mock_apaging.select_page = MagicMock(return_value=mock_page)
+        gen = _cursor_flow(q, conn, unique=True, is_async=True, raw_params=raw_params)
+        items, data = run_sync_flow(gen)
+
+    assert items == [10, 20]
+    mock_apaging.select_page.assert_called_once()
+    mock_paging.select_page.assert_not_called()
