@@ -433,6 +433,68 @@ def test_customize_page_ns_pydantic_v1_adds_validator_to_namespace():
     assert "__add_links_to_header__" in ns
 
 
+# ---------------------------------------------------------------------------
+# BaseUseLinks.customize_page_ns - pydantic v1 path (lines 111-119)
+# ---------------------------------------------------------------------------
+
+
+def test_customize_page_ns_pydantic_v1_adds_annotations_and_validator(mocker):
+    from fastapi_pagination.links.default import UseLinks
+
+    mocker.patch("fastapi_pagination.links.bases.IS_PYDANTIC_V2", False)
+    customizer = UseLinks()
+    ns = {}
+    customizer.customize_page_ns(object, ns)
+
+    assert "__annotations__" in ns
+    assert "links" in ns["__annotations__"]
+    assert "links" in ns
+    assert "__links_root_validator__" in ns
+
+
+def test_customize_page_ns_pydantic_v1_validator_sets_links_field(mocker):
+    from fastapi_pagination.links.bases import Links
+    from fastapi_pagination.links.default import UseLinks
+
+    mocker.patch("fastapi_pagination.links.bases.IS_PYDANTIC_V2", False)
+    customizer = UseLinks()
+    mock_links = Links(first="/first", last="/last", next=None, prev=None)
+    mocker.patch.object(customizer, "resolve_links", return_value=mock_links)
+
+    ns = {}
+    customizer.customize_page_ns(object, ns)
+
+    validator = ns["__links_root_validator__"]
+
+    inner_fn = getattr(validator, "func", None)
+    if inner_fn is None:
+        inner_fn = getattr(validator, "__func__", None)
+    if inner_fn is None:
+        inner_fn = getattr(validator, "__wrapped__", None)
+
+    if inner_fn is None:
+        pytest.skip("Cannot extract inner validator function from pydantic root_validator wrapper")
+
+    values = {"total": 10, "items": []}
+    result = inner_fn(None, values)
+
+    assert result is values
+    assert result["links"] is mock_links
+
+
+def test_customize_page_ns_pydantic_v1_custom_field_name(mocker):
+    from fastapi_pagination.links.default import UseLinks
+
+    mocker.patch("fastapi_pagination.links.bases.IS_PYDANTIC_V2", False)
+    customizer = UseLinks(field="pagination_links")
+    ns = {}
+    customizer.customize_page_ns(object, ns)
+
+    assert "__annotations__" in ns
+    assert "pagination_links" in ns["__annotations__"]
+    assert "__links_root_validator__" in ns
+
+
 def test_customize_page_ns_pydantic_v1_validator_body_executes(mocker):
     from fastapi_pagination.links.bases import Links
     from fastapi_pagination.links.default import UseHeaderLinks
