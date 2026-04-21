@@ -416,3 +416,49 @@ async def test_use_header_links_no_next_on_last_page():
     link_header = resp.headers["Link"]
     assert "next" not in link_header
     assert "prev" not in link_header
+
+
+# ---------------------------------------------------------------------------
+# BaseUseHeaderLinks._customize_page_ns_pydantic_v1 / __add_links_to_header__
+# ---------------------------------------------------------------------------
+
+
+def test_customize_page_ns_pydantic_v1_adds_validator_to_namespace():
+    from fastapi_pagination.links.default import UseHeaderLinks
+
+    customizer = UseHeaderLinks()
+    ns = {}
+    customizer._customize_page_ns_pydantic_v1(object, ns)
+
+    assert "__add_links_to_header__" in ns
+
+
+def test_customize_page_ns_pydantic_v1_validator_body_executes(mocker):
+    from fastapi_pagination.links.bases import Links
+    from fastapi_pagination.links.default import UseHeaderLinks
+
+    customizer = UseHeaderLinks()
+    mock_links = Links(first="/first", last="/last", next=None, prev=None)
+    mocker.patch.object(customizer, "resolve_links", return_value=mock_links)
+    mock_add = mocker.patch.object(customizer, "_add_links_to_header")
+
+    ns = {}
+    customizer._customize_page_ns_pydantic_v1(object, ns)
+
+    validator = ns["__add_links_to_header__"]
+
+    # In pydantic v2, root_validator wraps the function in a Decorator with a 'func' attribute
+    inner_fn = getattr(validator, "func", None)
+    if inner_fn is None:
+        inner_fn = getattr(validator, "__func__", None)
+    if inner_fn is None:
+        inner_fn = getattr(validator, "__wrapped__", None)
+
+    if inner_fn is None:
+        pytest.skip("Cannot extract inner validator function from pydantic root_validator wrapper")
+
+    values = {"total": 10, "items": []}
+    result = inner_fn(None, values)
+
+    assert result == values
+    mock_add.assert_called_once_with(mock_links)
