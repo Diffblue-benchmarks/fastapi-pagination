@@ -699,3 +699,94 @@ def test_cursor_flow_raises_for_no_ordering():
 
     with pytest.raises(ValueError, match="Cursor pagination requires ordering"):
         run_sync_flow(_cursor_flow(query, mock_conn, True, False, raw_params))
+
+
+def test_cursor_flow_raises_for_from_statement():
+    from fastapi_pagination.bases import CursorRawParams
+    from fastapi_pagination.ext.sqlalchemy import _cursor_flow
+
+    class FakeFromStatement:
+        pass
+
+    fake_query = FakeFromStatement()
+    mock_conn = MagicMock(spec=Session)
+    raw_params = CursorRawParams(cursor=None, size=10)
+
+    with patch("fastapi_pagination.ext.sqlalchemy.FromStatement", FakeFromStatement):
+        with pytest.raises(ValueError, match="Cursor pagination cannot be used with FromStatement"):
+            run_sync_flow(_cursor_flow(fake_query, mock_conn, True, False, raw_params))
+
+
+def test_cursor_flow_sync_returns_items_and_data():
+    from fastapi_pagination.bases import CursorRawParams
+    from fastapi_pagination.ext.sqlalchemy import _cursor_flow
+
+    query = select(users_table).order_by(users_table.c.id)
+    raw_params = CursorRawParams(cursor=None, size=5)
+    mock_conn = MagicMock(spec=Session)
+
+    mock_page_paging = MagicMock()
+    mock_page_paging.bookmark_current = "curr"
+    mock_page_paging.bookmark_current_backwards = "curr_back"
+    mock_page_paging.has_previous = True
+    mock_page_paging.bookmark_previous = "prev"
+    mock_page_paging.has_next = False
+    mock_page_paging.bookmark_next = "nxt"
+
+    mock_page = MagicMock()
+    mock_page.paging = mock_page_paging
+    mock_page.__iter__ = MagicMock(return_value=iter([1, 2, 3]))
+
+    mock_select_page = MagicMock(return_value=mock_page)
+
+    with patch("fastapi_pagination.ext.sqlalchemy.paging") as mock_paging_mod:
+        mock_paging_mod.select_page = mock_select_page
+
+        items, data = run_sync_flow(_cursor_flow(query, mock_conn, True, False, raw_params))
+
+    assert items == [1, 2, 3]
+    assert data["current"] == "curr"
+    assert data["current_backwards"] == "curr_back"
+    assert data["previous"] == "prev"
+    assert data["next_"] is None
+
+
+def test_cursor_flow_async_uses_apaging_and_returns_items_and_data():
+    from fastapi_pagination.bases import CursorRawParams
+    from fastapi_pagination.ext.sqlalchemy import _cursor_flow
+
+    query = select(users_table).order_by(users_table.c.id)
+    raw_params = CursorRawParams(cursor=None, size=3)
+    mock_conn = MagicMock(spec=Session)
+
+    mock_page_paging = MagicMock()
+    mock_page_paging.bookmark_current = "a"
+    mock_page_paging.bookmark_current_backwards = "b"
+    mock_page_paging.has_previous = False
+    mock_page_paging.bookmark_previous = "prev_val"
+    mock_page_paging.has_next = True
+    mock_page_paging.bookmark_next = "next_val"
+
+    mock_page = MagicMock()
+    mock_page.paging = mock_page_paging
+    mock_page.__iter__ = MagicMock(return_value=iter([10, 20]))
+
+    mock_async_select_page = MagicMock(return_value=mock_page)
+
+    with patch("fastapi_pagination.ext.sqlalchemy.apaging") as mock_apaging_mod:
+        mock_apaging_mod.select_page = mock_async_select_page
+
+        items, data = run_sync_flow(_cursor_flow(query, mock_conn, False, True, raw_params))
+
+    assert items == [10, 20]
+    assert data["current"] == "a"
+    assert data["current_backwards"] == "b"
+    assert data["previous"] is None
+    assert data["next_"] == "next_val"
+    mock_async_select_page.assert_called_once_with(
+        mock_conn,
+        selectable=query,
+        unique=False,
+        per_page=3,
+        page=None,
+    )
