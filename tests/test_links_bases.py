@@ -201,6 +201,59 @@ class TestBaseUseLinksCustomizePageNs:
 
 
 # ---------------------------------------------------------------------------
+# Tests for BaseUseLinks.customize_page_ns - Pydantic v1 branch (mocked)
+# ---------------------------------------------------------------------------
+
+
+class TestBaseUseLinksCustomizePageNsV1Branch:
+    """Tests targeting the Pydantic v1 branch (lines 111-119) by mocking IS_PYDANTIC_V2=False."""
+
+    def test_v1_branch_adds_annotations_to_namespace(self, mocker):
+        mocker.patch("fastapi_pagination.links.bases.IS_PYDANTIC_V2", False)
+        customizer = _ConcreteUseLinks()
+        ns: dict = {}
+        page_cls = MagicMock()
+        customizer.customize_page_ns(page_cls, ns)
+        assert "links" in ns.get("__annotations__", {})
+
+    def test_v1_branch_adds_root_validator_to_namespace(self, mocker):
+        mocker.patch("fastapi_pagination.links.bases.IS_PYDANTIC_V2", False)
+        customizer = _ConcreteUseLinks()
+        ns: dict = {}
+        page_cls = MagicMock()
+        customizer.customize_page_ns(page_cls, ns)
+        assert "__links_root_validator__" in ns
+
+    def test_v1_branch_custom_field_name(self, mocker):
+        mocker.patch("fastapi_pagination.links.bases.IS_PYDANTIC_V2", False)
+        customizer = _ConcreteUseLinks(field="my_links")
+        ns: dict = {}
+        page_cls = MagicMock()
+        customizer.customize_page_ns(page_cls, ns)
+        assert "my_links" in ns.get("__annotations__", {})
+        assert "__links_root_validator__" in ns
+
+    def test_v1_branch_root_validator_resolves_links(self, mocker):
+        mocker.patch("fastapi_pagination.links.bases.IS_PYDANTIC_V2", False)
+        # Mock root_validator as an identity decorator so the raw function is stored directly
+        mocker.patch(
+            "fastapi_pagination.links.bases.root_validator",
+            lambda *a, **kw: (lambda f: f),
+        )
+        customizer = _ConcreteUseLinks()
+        ns: dict = {}
+        page_cls = MagicMock()
+        customizer.customize_page_ns(page_cls, ns)
+
+        validator = ns["__links_root_validator__"]
+        assert callable(validator)
+        values: dict = {}
+        result = validator(MagicMock, values)
+        assert isinstance(result, dict)
+        assert "links" in result
+
+
+# ---------------------------------------------------------------------------
 # Tests for BaseUseHeaderLinks._add_links_to_header
 # ---------------------------------------------------------------------------
 
