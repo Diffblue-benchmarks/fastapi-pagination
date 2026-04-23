@@ -1,3 +1,4 @@
+import inspect
 import pytest
 from contextvars import ContextVar
 from typing import Any
@@ -10,6 +11,7 @@ from httpx import ASGITransport, AsyncClient
 
 from fastapi_pagination.api import (
     _add_pagination,
+    _create_params_dependency,
     _ctx_var_with_reset,
     _model_validate_has_by_name_param,
     _noop_dep,
@@ -29,7 +31,7 @@ from fastapi_pagination.api import (
     set_page,
     set_params,
 )
-from fastapi_pagination.bases import AbstractPage, AbstractParams
+from fastapi_pagination.bases import AbstractPage, AbstractParams, RawParams
 from fastapi_pagination.default import Page, Params
 from fastapi_pagination.errors import UninitializedConfigurationError
 
@@ -545,3 +547,70 @@ def test_pagination_ctx_with_params_only():
     assert response.status_code == 200
     data = response.json()
     assert len(data["items"]) == 4
+
+
+# ---------------------------------------------------------------------------
+# _create_params_dependency
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_create_params_dependency_non_pydantic_params():
+    """Line 241: val = params(*args, **kwargs) - else branch for non-BaseModel params."""
+
+    class SimpleParams(AbstractParams):
+        def __init__(self, page: int = 1, size: int = 10):
+            self.page = page
+            self.size = size
+
+        def to_raw_params(self) -> RawParams:
+            return RawParams(limit=self.size, offset=self.size * (self.page - 1))
+
+    dep = _create_params_dependency(SimpleParams)
+
+    collected = []
+    async for val in dep(page=3, size=7):
+        collected.append(val)
+
+    assert len(collected) == 1
+    assert isinstance(collected[0], SimpleParams)
+    assert collected[0].page == 3
+    assert collected[0].size == 7
+
+
+def test_create_params_dependency_pydantic_required_field():
+    """Line 260: param_default = inspect.Parameter.empty for pydantic fields with no default (pydantic >= 2.12.5)."""
+    from fastapi_pagination.pydantic.consts import IS_PYDANTIC_V2_12_5_OR_HIGHER
+    from pydantic import BaseModel
+
+    if not IS_PYDANTIC_V2_12_5_OR_HIGHER:
+        pytest.skip("Requires pydantic >= 2.12.5")
+
+    class RequiredFieldParams(BaseModel, AbstractParams):
+        page: int  # required, no default
+        size: int = 10
+
+        def to_raw_params(self) -> RawParams:
+            return RawParams(limit=self.size, offset=self.size * (self.page - 1))
+
+    dep = _create_params_dependency(RequiredFieldParams)
+    sign = inspect.signature(dep)
+
+    assert sign.parameters["page"].default is inspect.Parameter.empty
+    assert sign.parameters["size"].default == 10
+
+
+def test_create_params_dependency_pydantic_v2_legacy_get_param(mocker):
+    """Lines 270-271: _get_param for pydantic v2 without 2.12.5 default-migration logic."""
+    from fastapi_pagination.pydantic import IS_PYDANTIC_V2
+
+    if not IS_PYDANTIC_V2:
+        pytest.skip("Requires pydantic v2")
+
+    mocker.patch("fastapi_pagination.api.IS_PYDANTIC_V2_12_5_OR_HIGHER", False)
+
+    dep = _create_params_dependency(Params)
+    sign = inspect.signature(dep)
+
+    assert "page" in sign.parameters
+    assert "size" in sign.parameters
