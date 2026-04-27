@@ -21,6 +21,7 @@ from fastapi_pagination.ext.sqlalchemy import (
     _should_unwrap_scalars,
     _should_unwrap_scalars_for_query,
     _sqlalchemy_flow,
+    _total_flow,
     _unwrap_items,
     _unwrap_params,
     apaginate,
@@ -547,3 +548,42 @@ async def test_sqlalchemy_flow_async_wraps_create_page_factory():
         )
 
     assert result is mock_page
+
+
+# ---- _total_flow ----
+
+
+def test_total_flow_count_query_none_creates_count_query():
+    """Cover lines 276-277, 279-280: when count_query is None, it is created."""
+    mock_conn = MagicMock()
+    mock_conn.scalar.return_value = 10
+    query = select(User)
+
+    result = run_sync_flow(_total_flow(query, mock_conn, None, True))
+
+    assert result == 10
+    mock_conn.scalar.assert_called_once()
+
+
+def test_total_flow_count_query_provided_skips_creation():
+    """Cover lines 279-280: when count_query is provided, it is used directly."""
+    mock_conn = MagicMock()
+    mock_conn.scalar.return_value = 5
+    query = select(User)
+    count_query = select(func.count()).select_from(User)
+
+    result = run_sync_flow(_total_flow(query, mock_conn, count_query, False))
+
+    assert result == 5
+    mock_conn.scalar.assert_called_once_with(count_query)
+
+
+def test_total_flow_returns_none_when_scalar_returns_none():
+    """Cover lines 279-280: total can be None."""
+    mock_conn = MagicMock()
+    mock_conn.scalar.return_value = None
+    query = select(User)
+
+    result = run_sync_flow(_total_flow(query, mock_conn, None, False))
+
+    assert result is None
