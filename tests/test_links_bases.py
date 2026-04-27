@@ -376,3 +376,91 @@ def test_customize_page_ns_pydantic_v1_validator_calls_resolve_links(mocker):
     link_header = mock_response.headers["Link"]
     assert 'rel="next"' in link_header
     assert 'rel="last"' in link_header
+
+
+# ---------------------------------------------------------------------------
+# BaseUseLinks.customize_page_ns - pydantic v1 path (mocked IS_PYDANTIC_V2=False)
+# ---------------------------------------------------------------------------
+
+
+def test_use_links_customize_page_ns_mocked_v1_adds_root_validator(mocker):
+    mocker.patch("fastapi_pagination.links.bases.IS_PYDANTIC_V2", False)
+
+    customizer = ConcreteUseLinks()
+    ns: dict[str, Any] = {}
+    page_cls = MagicMock()
+
+    customizer.customize_page_ns(page_cls, ns)
+
+    assert "__links_root_validator__" in ns
+
+
+def test_use_links_customize_page_ns_mocked_v1_adds_field_annotation(mocker):
+    mocker.patch("fastapi_pagination.links.bases.IS_PYDANTIC_V2", False)
+
+    customizer = ConcreteUseLinks()
+    ns: dict[str, Any] = {}
+    page_cls = MagicMock()
+
+    customizer.customize_page_ns(page_cls, ns)
+
+    assert "__annotations__" in ns
+    assert "links" in ns["__annotations__"]
+
+
+def test_use_links_customize_page_ns_mocked_v1_root_validator_sets_links(mocker):
+    mocker.patch("fastapi_pagination.links.bases.IS_PYDANTIC_V2", False)
+
+    customizer = ConcreteUseLinks()
+    ns: dict[str, Any] = {}
+    page_cls = MagicMock()
+
+    customizer.customize_page_ns(page_cls, ns)
+
+    validator = ns["__links_root_validator__"]
+    values: dict[str, Any] = {"items": [], "total": 0, "page": 1, "size": 10}
+    result = validator.__wrapped__(None, values)
+
+    assert "links" in result
+    assert isinstance(result["links"], Links)
+
+
+def test_use_links_customize_page_ns_mocked_v1_root_validator_returns_values(mocker):
+    mocker.patch("fastapi_pagination.links.bases.IS_PYDANTIC_V2", False)
+
+    customizer = ConcreteUseLinks()
+    ns: dict[str, Any] = {}
+    page_cls = MagicMock()
+
+    customizer.customize_page_ns(page_cls, ns)
+
+    validator = ns["__links_root_validator__"]
+    values: dict[str, Any] = {"items": [1, 2], "total": 2}
+    result = validator.__wrapped__(None, values)
+
+    assert result is values
+
+
+def test_use_links_customize_page_ns_mocked_v1_custom_field_name(mocker):
+    mocker.patch("fastapi_pagination.links.bases.IS_PYDANTIC_V2", False)
+
+    @dataclass
+    class CustomFieldLinks(BaseUseLinks):
+        field: str = "my_links"
+
+        def resolve_links(self, _page: Any, /) -> Links:
+            return Links(first="/first", last="/last")
+
+    customizer = CustomFieldLinks()
+    ns: dict[str, Any] = {}
+    page_cls = MagicMock()
+
+    customizer.customize_page_ns(page_cls, ns)
+
+    assert "__links_root_validator__" in ns
+    assert "my_links" in ns["__annotations__"]
+    validator = ns["__links_root_validator__"]
+    values: dict[str, Any] = {"items": []}
+    result = validator.__wrapped__(None, values)
+    assert "my_links" in result
+    assert isinstance(result["my_links"], Links)
