@@ -10,8 +10,11 @@ from fastapi import FastAPI
 from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
 
+from unittest.mock import patch
+
 from fastapi_pagination.api import (
     _add_pagination,
+    _create_params_dependency,
     _ctx_var_with_reset,
     _model_validate_has_by_name_param,
     _noop_dep,
@@ -32,8 +35,10 @@ from fastapi_pagination.api import (
     set_page,
     set_params,
 )
+from fastapi_pagination.bases import AbstractParams, BaseRawParams, RawParams
 from fastapi_pagination.default import Page, Params
 from fastapi_pagination.errors import UninitializedConfigurationError
+from pydantic import BaseModel
 
 
 # ---------------------------------------------------------------------------
@@ -468,3 +473,72 @@ def test_update_route_skips_if_already_has_pagination_dep():
     # Calling _update_route again should not add another dependency
     _update_route(route)
     assert len(route.dependant.dependencies) == deps_before
+
+
+# ---------------------------------------------------------------------------
+# _create_params_dependency
+# ---------------------------------------------------------------------------
+
+class _NonModelParams(AbstractParams):
+    """Non-pydantic-BaseModel params to trigger the params(*args, **kwargs) branch (line 241)."""
+
+    __page_type__ = None
+
+    def __init__(self, page: int = 1, size: int = 10) -> None:
+        self.page = page
+        self.size = size
+
+    def to_raw_params(self) -> BaseRawParams:
+        return RawParams(limit=self.size, offset=(self.page - 1) * self.size)
+
+
+@pytest.mark.asyncio
+async def test_create_params_dependency_non_pydantic_model_calls_params_constructor():
+    """Line 241: val = params(*args, **kwargs) is hit when params is not a pydantic BaseModel."""
+    dep = _create_params_dependency(_NonModelParams)
+    gen = dep(page=2, size=5)
+    val = await gen.__anext__()
+    assert isinstance(val, _NonModelParams)
+    assert val.page == 2
+    assert val.size == 5
+
+
+class _RequiredFieldParams(BaseModel, AbstractParams):
+    """Pydantic v2 model with a required field (no default) to trigger the empty-default branch (line 260)."""
+
+    __page_type__ = None
+
+    page: int  # no default -> field.default is UndefinedV2
+    size: int = 10
+
+    def to_raw_params(self) -> BaseRawParams:
+        return RawParams(limit=self.size, offset=(self.page - 1) * self.size)
+
+
+@pytest.mark.asyncio
+async def test_create_params_dependency_required_field_uses_empty_default():
+    """Line 260: param_default = inspect.Parameter.empty when field has no default."""
+    import inspect
+
+    dep = _create_params_dependency(_RequiredFieldParams)
+    sig = dep.__signature__
+    page_param = sig.parameters["page"]
+    assert page_param.default is inspect.Parameter.empty
+    gen = dep(page=3, size=7)
+    val = await gen.__anext__()
+    assert isinstance(val, _RequiredFieldParams)
+    assert val.page == 3
+    assert val.size == 7
+
+
+@pytest.mark.asyncio
+async def test_create_params_dependency_pre_v2_12_5_uses_field_as_default():
+    """Lines 270-271: _get_param returns annotation=field.annotation, default=field when
+    IS_PYDANTIC_V2 is True but IS_PYDANTIC_V2_12_5_OR_HIGHER is False."""
+    with patch("fastapi_pagination.api.IS_PYDANTIC_V2_12_5_OR_HIGHER", False):
+        dep = _create_params_dependency(_RequiredFieldParams)
+    gen = dep(page=1, size=5)
+    val = await gen.__anext__()
+    assert isinstance(val, _RequiredFieldParams)
+    assert val.page == 1
+    assert val.size == 5
