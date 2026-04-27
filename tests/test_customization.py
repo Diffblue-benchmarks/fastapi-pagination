@@ -464,6 +464,19 @@ def test_use_fields_aliases_customize_page_ns():
     assert p.__model_aliases__["page"] == "p"
 
 
+def test_use_fields_aliases_customize_page_ns_v1_sets_alias():
+    v1_page = CustomizedPage[Page, UsePydanticV1()]
+    p = CustomizedPage[v1_page, UseFieldsAliases(total="t")]
+    assert hasattr(p, "__fields__")
+    assert p.__fields__["total"].alias == "t"
+
+
+def test_use_fields_aliases_customize_page_ns_v1_unknown_field_raises():
+    v1_page = CustomizedPage[Page, UsePydanticV1()]
+    with pytest.raises(AssertionError, match="Unknown field"):
+        CustomizedPage[v1_page, UseFieldsAliases(nonexistent_field_xyz="alias")]
+
+
 # ---------------------------------------------------------------------------
 # UseAdditionalFields
 # ---------------------------------------------------------------------------
