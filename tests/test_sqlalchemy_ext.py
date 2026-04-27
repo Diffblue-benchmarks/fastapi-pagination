@@ -20,6 +20,7 @@ from fastapi_pagination.ext.sqlalchemy import (
     _prepare_query_for_cursor,
     _should_unwrap_scalars,
     _should_unwrap_scalars_for_query,
+    _sqlalchemy_flow,
     _unwrap_items,
     _unwrap_params,
     apaginate,
@@ -29,6 +30,7 @@ from fastapi_pagination.ext.sqlalchemy import (
     create_paginate_query_from_text,
     paginate,
 )
+from fastapi_pagination.flow import run_async_flow, run_sync_flow
 
 
 class Base(DeclarativeBase):
@@ -485,4 +487,63 @@ async def test_apaginate_with_count_query():
 
     with patch("fastapi_pagination.ext.sqlalchemy.run_async_flow", new=AsyncMock(return_value=mock_page)):
         result = await apaginate(mock_conn, select(User), count_query=cq)
+    assert result is mock_page
+
+
+# ---- _sqlalchemy_flow ----
+
+
+def test_sqlalchemy_flow_sync_executes_flow():
+    """Cover lines 346, 347 (False branch), 350, 363 in _sqlalchemy_flow."""
+    mock_conn = MagicMock()
+    query = select(User)
+    params = Params(page=1, size=10)
+    mock_page = MagicMock()
+
+    def fake_generic_flow(**kwargs):
+        return mock_page
+        yield  # noqa: unreachable — makes this a generator function
+
+    with patch("fastapi_pagination.ext.sqlalchemy.generic_flow", fake_generic_flow):
+        result = run_sync_flow(
+            _sqlalchemy_flow(
+                is_async=False,
+                conn=mock_conn,
+                query=query,
+                params=params,
+            )
+        )
+
+    assert result is mock_page
+
+
+@pytest.mark.asyncio
+async def test_sqlalchemy_flow_async_wraps_create_page_factory():
+    """Cover lines 346, 347 (True branch), 348, 350, 363 in _sqlalchemy_flow."""
+    mock_conn = MagicMock()
+    query = select(User)
+    params = Params(page=1, size=10)
+    mock_page = MagicMock()
+
+    def fake_generic_flow(**kwargs):
+        # Verify create_page_factory was wrapped with greenlet_spawn for async
+        create_page_factory = kwargs.get("create_page_factory")
+        assert create_page_factory is not None
+        from functools import partial
+        from sqlalchemy.util import greenlet_spawn
+        assert isinstance(create_page_factory, partial)
+        assert create_page_factory.func is greenlet_spawn
+        return mock_page
+        yield  # noqa: unreachable — makes this a generator function
+
+    with patch("fastapi_pagination.ext.sqlalchemy.generic_flow", fake_generic_flow):
+        result = await run_async_flow(
+            _sqlalchemy_flow(
+                is_async=True,
+                conn=mock_conn,
+                query=query,
+                params=params,
+            )
+        )
+
     assert result is mock_page
