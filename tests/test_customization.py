@@ -517,6 +517,80 @@ def test_use_response_headers_customize_page_ns_adds_model_post_init():
     assert callable(ns["model_post_init"])
 
 
+def test_use_response_headers_model_post_init_str_header():
+    from fastapi import Response
+    from fastapi_pagination.api import _rsp_val
+
+    rsp = Response()
+    token = _rsp_val.set(rsp)
+    try:
+        p = CustomizedPage[Page, UseResponseHeaders(resolver=lambda _page: {"X-Custom": "hello"})]
+        instance = p.create(items=[], params=p.__params_type__(), total=0)
+        assert rsp.headers["X-Custom"] == "hello"
+    finally:
+        _rsp_val.reset(token)
+
+
+def test_use_response_headers_model_post_init_sequence_header():
+    from fastapi import Response
+    from fastapi_pagination.api import _rsp_val
+
+    rsp = Response()
+    token = _rsp_val.set(rsp)
+    try:
+        p = CustomizedPage[
+            Page,
+            UseResponseHeaders(resolver=lambda _page: {"X-Items": ["val1", "val2"]}),
+            UseName("PageWithSeqHeaders"),
+        ]
+        p.create(items=[], params=p.__params_type__(), total=0)
+        header_values = rsp.headers.getlist("X-Items")
+        assert "val1" in header_values
+        assert "val2" in header_values
+    finally:
+        _rsp_val.reset(token)
+
+
+def test_use_response_headers_model_post_init_sequence_existing_header_deleted():
+    from fastapi import Response
+    from fastapi_pagination.api import _rsp_val
+
+    rsp = Response()
+    rsp.headers["X-Replace"] = "old"
+    token = _rsp_val.set(rsp)
+    try:
+        p = CustomizedPage[
+            Page,
+            UseResponseHeaders(resolver=lambda _page: {"X-Replace": ["new1", "new2"]}),
+            UseName("PageWithReplaceHeaders"),
+        ]
+        p.create(items=[], params=p.__params_type__(), total=0)
+        header_values = rsp.headers.getlist("X-Replace")
+        assert "old" not in header_values
+        assert "new1" in header_values
+        assert "new2" in header_values
+    finally:
+        _rsp_val.reset(token)
+
+
+def test_use_response_headers_model_post_init_invalid_type_raises():
+    from fastapi import Response
+    from fastapi_pagination.api import _rsp_val
+
+    rsp = Response()
+    token = _rsp_val.set(rsp)
+    try:
+        p = CustomizedPage[
+            Page,
+            UseResponseHeaders(resolver=lambda _page: {"X-Bad": 123}),
+            UseName("PageWithBadHeaders"),
+        ]
+        with pytest.raises(TypeError, match="Header value must be str or list"):
+            p.create(items=[], params=p.__params_type__(), total=0)
+    finally:
+        _rsp_val.reset(token)
+
+
 # ---------------------------------------------------------------------------
 # _convert_v2_field_to_v1
 # ---------------------------------------------------------------------------
