@@ -334,3 +334,45 @@ def test_use_header_links_add_links_to_header_validator(mocker):
     values = {"items": [], "total": 0, "page": 1, "size": 10}
     result = validator.__wrapped__(None, values)
     assert result == values
+
+
+def test_customize_page_ns_pydantic_v1_validator_body_returns_values(mocker):
+    mock_response = MagicMock()
+    mock_response.headers = {}
+    mocker.patch("fastapi_pagination.links.bases.response", return_value=mock_response)
+
+    customizer = ConcreteUseHeaderLinks()
+    ns: dict[str, Any] = {}
+    page_cls = MagicMock()
+
+    customizer._customize_page_ns_pydantic_v1(page_cls, ns)
+
+    assert "__add_links_to_header__" in ns
+    validator = ns["__add_links_to_header__"]
+    values = {"items": [], "total": 0, "page": 1, "size": 10}
+    result = validator.__wrapped__(None, values)
+
+    assert result == values
+    assert "Link" in mock_response.headers
+    assert 'rel="first"' in mock_response.headers["Link"]
+
+
+def test_customize_page_ns_pydantic_v1_validator_calls_resolve_links(mocker):
+    mock_response = MagicMock()
+    mock_response.headers = {}
+    mocker.patch("fastapi_pagination.links.bases.response", return_value=mock_response)
+
+    customizer = ConcreteUseHeaderLinks()
+    ns: dict[str, Any] = {}
+    page_cls = MagicMock()
+
+    customizer._customize_page_ns_pydantic_v1(page_cls, ns)
+
+    validator = ns["__add_links_to_header__"]
+    values = {"items": [1, 2, 3], "total": 3, "page": 2, "size": 10}
+    result = validator.__wrapped__(None, values)
+
+    assert result is values
+    link_header = mock_response.headers["Link"]
+    assert 'rel="next"' in link_header
+    assert 'rel="last"' in link_header
